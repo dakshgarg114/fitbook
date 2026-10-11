@@ -1,0 +1,6 @@
+packages:
+  - web
+  - server
+allowBuilds:
+  '@firebase/util': false
+  protobufjs: false

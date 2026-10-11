@@ -1,0 +1,10 @@
+# Cloudflare Tunnel for Fitbook. Copy to scripts/cloudflared.yml and fill in your values:
+#   cloudflared tunnel create fitbook
+#   cloudflared tunnel route dns fitbook fitbook.example.com
+tunnel: <TUNNEL_ID>
+credentials-file: /path/to/.cloudflared/<TUNNEL_ID>.json
+protocol: http2
+ingress:
+  - hostname: fitbook.example.com
+    service: http://127.0.0.1:4310
+  - service: http_status:404

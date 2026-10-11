@@ -1,0 +1,32 @@
+{
+  "name": "fitbook",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:server": "pnpm --filter server dev",
+    "build": "pnpm --filter web build",
+    "start": "pnpm --filter server start",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript-eslint": "^8.71.1"
+  },
+  "description": "A mobile-first food diary: tell it what you ate and it logs, scores and sketches your day.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dakshgarg114/fitbook.git"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

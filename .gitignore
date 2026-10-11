@@ -1,0 +1,14 @@
+node_modules/
+dist/
+data/*
+!data/.gitkeep
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+
+# Machine-specific and private notes; not part of the open-source project.
+scripts/cloudflared.yml
+scripts/compare/
+docs/
