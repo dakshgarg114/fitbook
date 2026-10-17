@@ -43,6 +43,7 @@ function rule(y: number): Point[] {
 
 export function buildCanvas(meals: MealRow[]): Canvas {
   const items: CanvasItem[] = [];
+  const rows: NonNullable<Canvas['rows']> = [];
   let y = 12;
 
   if (meals.length === 0) {
@@ -84,9 +85,11 @@ export function buildCanvas(meals: MealRow[]): Canvas {
     text('ff', `F ${Math.round(t.fat)}g · Fib ${Math.round(t.fiber)}g`, 17, '#6b665a', 22);
     if (m.note) wrap(m.note, 19, 2).forEach((l, n) => text(`n${n}`, l, 19, '#4a4538', 20));
 
+    const top = y;
     y = Math.max(y + DOODLE_BOX_H, ty - 10) + ROW_GAP;
+    rows.push({ mealId: m.id, y: top - ROW_GAP / 2, height: y - top });
     if (i < meals.length - 1) items.push({ type: 'stroke', id: `${id}-rule`, points: rule(y - ROW_GAP / 2), size: 1.4, color: '#d9d0bb' });
   });
 
-  return { width: WIDTH, height: y, items };
+  return { width: WIDTH, height: y, items, rows };
 }

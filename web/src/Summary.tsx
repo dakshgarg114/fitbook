@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
-import type { DayView, Me } from '../../shared/types.ts';
+import type { AgentStage, DayView, Me } from '../../shared/types.ts';
 import { api } from './api.ts';
-import { AgentOrb, ThinkingOrb } from './Orb.tsx';
+import { AgentOrb, STAGE_WORDS, ThinkingOrb } from './Orb.tsx';
 
 const LABELS = [
   ['carbs', 'Carbs'],
@@ -50,7 +50,8 @@ function Ring({ value, label }: { value: number; label: string }) {
   );
 }
 
-export function Summary({ day, me, onLog }: { day: DayView; me: Me; onLog?: () => void }) {
+// stage: the agent is working on the last message; the Log button shows what it's doing.
+export function Summary({ day, me, stage, onLog }: { day: DayView; me: Me; stage: AgentStage | null; onLog?: () => void }) {
   const [open, setOpen] = useState(false);
   const [tips, setTips] = useState<string | null>(day.tips);
   const [loading, setLoading] = useState(false);
@@ -102,11 +103,17 @@ export function Summary({ day, me, onLog }: { day: DayView; me: Me; onLog?: () =
             </button>
           )}
           {onLog && (
-            <button class="log-btn" onClick={onLog}>
+            <button class={`log-btn ${stage ? 'working' : ''}`} onClick={onLog}>
               <span class="orb-chip">
-                <AgentOrb state="breathing" label="Open chat" />
+                <AgentOrb state={stage ? 'working' : 'breathing'} label="Open chat" />
               </span>
-              Log
+              {stage ? (
+                <span key={stage} class="status-word">
+                  {STAGE_WORDS[stage]}…
+                </span>
+              ) : (
+                'Log'
+              )}
             </button>
           )}
         </div>

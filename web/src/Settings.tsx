@@ -147,6 +147,41 @@ export function Settings({ me, onSaved, onClose }: { me: Me; onSaved: (m: Me) =>
             </>
           )}
 
+          {me.memories.length > 0 && (
+            <>
+              <h3 class="sec-h">What your coach remembers</h3>
+              <div class="memories">
+                {me.memories.map((m) => (
+                  <div key={m.id} class="memory">
+                    <span>{m.text}</span>
+                    <button
+                      type="button"
+                      aria-label={`Forget “${m.text}”`}
+                      onClick={() =>
+                        api<Me>(`/me/memories/${m.id}`, { method: 'DELETE' })
+                          .then(onSaved)
+                          .catch(() => {})
+                      }
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        width="13"
+                        height="13"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.4"
+                        stroke-linecap="round"
+                      >
+                        <path d="M6 6l12 12M18 6L6 18" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <p class="goals-note">Tell the chat things like “I’m vegetarian” and it keeps them in mind.</p>
+            </>
+          )}
+
           <h3 class="sec-h">Theme</h3>
           <div class="themes" role="radiogroup" aria-label="Theme">
             {THEMES.map((k) => {

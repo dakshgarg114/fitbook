@@ -1,7 +1,7 @@
 // Agent activity indicators built on the thinking-orbs library (dotted canvas orbs).
-import { useEffect, useState } from 'preact/hooks';
 import { ThinkingOrb as Orb } from 'thinking-orbs';
 import { THEME_INFO, currentTheme } from './theme.ts';
+import type { AgentStage } from '../../shared/types.ts';
 
 type OrbState = 'working' | 'searching' | 'solving' | 'listening' | 'connecting' | 'weaving' | 'composing' | 'breathing' | 'shaping';
 
@@ -20,33 +20,21 @@ export function ThinkingOrb({ label, state = 'working' }: { label: string; state
   );
 }
 
-// What the agent is doing while a chat message is processed. The server does these
-// steps in order; we advance the label on a timer and hold on the last one.
-const STEPS: { label: string; state: OrbState }[] = [
-  { label: 'Reading your message', state: 'working' },
-  { label: 'Looking up nutrition', state: 'searching' },
-  { label: 'Sketching your meal', state: 'composing' },
-  { label: 'Updating your canvas', state: 'weaving' },
-];
+export const STAGE_WORDS: Record<AgentStage, string> = {
+  analysing: 'Analysing',
+  wiggling: 'Wiggling',
+  fabricating: 'Fabricating',
+  doodling: 'Doodling',
+};
 
-export function AgentSteps({ photo }: { photo: boolean }) {
-  const steps = photo ? [{ label: 'Looking at your photo', state: 'searching' as OrbState }, ...STEPS.slice(1)] : STEPS;
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setI((n) => Math.min(n + 1, steps.length - 1)), photo ? 3500 : 2200);
-    return () => clearInterval(t);
-  }, [photo]);
+// What the agent is doing with a chat message: one orb and one line whose word follows the server's stage.
+export function AgentStatus({ stage }: { stage: AgentStage }) {
   return (
-    <div class="agent-steps" role="status" aria-live="polite">
-      <AgentOrb state={steps[i].state} label={steps[i].label} />
-      <div class="steps">
-        {steps.slice(0, i + 1).map((s, n) => (
-          <span key={s.label} class={n === i ? 'step now' : 'step done'}>
-            {n < i ? '✓ ' : ''}
-            {s.label}
-          </span>
-        ))}
-      </div>
+    <div class="agent-status" role="status" aria-live="polite">
+      <AgentOrb state="working" label={STAGE_WORDS[stage]} />
+      <span key={stage} class="status-word">
+        {STAGE_WORDS[stage]}…
+      </span>
     </div>
   );
 }

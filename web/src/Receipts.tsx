@@ -2,7 +2,7 @@
 // Those become action receipts under its reply instead of plain text.
 // Matched strictly, so a reply that happens to start with "Logged…" stays part of the reply.
 const RECEIPT =
-  /^(Logged .+ at \d{1,2}:\d{2}, \d+ kcal\.|Removed .+\.|Updated your .+|Updated .+ to \d+ g \(\d+ kcal\)\.|Added .+ \(\d+ kcal\) to .+\.|Your daily targets:.*)$/;
+  /^(Logged .+ at \d{1,2}:\d{2}, \d+ kcal\.|Removed .+\.|Updated your .+|Updated .+ to \d+ g \(\d+ kcal\)\.|Added .+ \(\d+ kcal\) to .+\.|Your daily targets:.*|Remembered: .+\.|Forgot: .+\.)$/;
 export function splitReply(text: string): { reply: string; actions: string[] } {
   const lines = text.split('\n');
   const actions = lines.filter((l) => RECEIPT.test(l.trim()));
@@ -16,7 +16,7 @@ export function splitReply(text: string): { reply: string; actions: string[] } {
 }
 
 export function Receipt({ text }: { text: string }) {
-  const kind = /^Removed/.test(text) ? 'remove' : /^(Updated|Your daily)/.test(text) ? 'edit' : 'add';
+  const kind = /^(Removed|Forgot)/.test(text) ? 'remove' : /^(Updated|Your daily|Remembered)/.test(text) ? 'edit' : 'add';
   const icon = kind === 'remove' ? 'M6 12h12' : kind === 'edit' ? 'M4 20h4L19 9l-4-4L4 16v4z' : 'M5 12.5l4.5 4.5L19 7';
   return (
     <div class={`receipt ${kind}`}>

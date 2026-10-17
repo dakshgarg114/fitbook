@@ -40,6 +40,7 @@ export interface Canvas {
   width: number;
   height: number;
   items: CanvasItem[];
+  rows?: { mealId: number; y: number; height: number }[]; // where each meal sits, so a tap can open it
 }
 
 export interface Macros {
@@ -76,8 +77,11 @@ export interface LogEntry extends Macros {
   name: string;
   grams: number;
   foodGroup: FoodGroup;
-  source: 'usda' | 'estimate';
-  usdaDescription: string | null;
+  // usda/ifct: a table row; recipe: ingredients added up; web: read from a web page; estimate: the model's guess.
+  source: 'usda' | 'ifct' | 'recipe' | 'web' | 'estimate';
+  usdaDescription: string | null; // the matched table row's name (USDA or IFCT)
+  ingredients: { name: string; grams: number }[] | null; // home recipes: what it was made from
+  sourceUrl: string | null; // web: where the numbers came from
 }
 
 export interface Meal {
@@ -132,18 +136,25 @@ export interface Me {
   profileComplete: boolean;
   targets: Targets | null;
   guideSeen: boolean;
+  memories: { id: number; text: string }[]; // lasting facts the coach keeps, e.g. "Vegetarian"
 }
 
+// One thread across all days; `date` is the day that was open when it was sent.
 export interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
-  hasPhoto: boolean;
+  photos: number;
+  date: string;
   createdAt: string;
   suggestions?: string[]; // quick replies offered with an assistant message
 }
 
+// What the agent is doing with the user's last message, shown as one changing line.
+export type AgentStage = 'analysing' | 'wiggling' | 'fabricating' | 'doodling';
+
 export interface DayView {
   date: string;
+  pending: AgentStage | null; // the agent is still working on the user's last message
   version: number;
   canvas: Canvas;
   meals: Meal[];

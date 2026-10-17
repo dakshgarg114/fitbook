@@ -958,8 +958,52 @@ input {
   color: var(--danger);
   font-size: 13px;
 }
+/* One thread across all days: marks where the open page changed. */
+.day-chip {
+  align-self: center;
+  margin: 10px 0 2px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.memories {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.memory {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px 10px 14px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  font-size: 14px;
+  line-height: 1.35;
+}
+.memory span {
+  flex: 1;
+}
+.memory button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--ink-2);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
 .photo-tag {
-  display: inline-block;
+  display: block;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -968,34 +1012,39 @@ input {
   margin-bottom: 4px;
 }
 
-.agent-steps {
+.agent-status {
   align-self: flex-start;
   display: flex;
   gap: 10px;
-  align-items: flex-start;
-  padding: 10px 14px;
+  align-items: center;
+  padding: 9px 16px 9px 11px;
   border-radius: 18px;
   background: var(--glass);
   border: 1px solid var(--glass-edge);
+  font-size: 14px;
 }
-.steps {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 13px;
-  padding-top: 1px;
-}
-.step.done {
-  color: var(--muted);
-}
-.step.now {
+/* One word that changes with the agent's stage: it slides in and shimmers while it holds. */
+.status-word {
+  display: inline-block;
   color: var(--ink);
-  background: linear-gradient(90deg, var(--ink) 0%, var(--muted) 50%, var(--ink) 100%);
+  background: linear-gradient(90deg, currentColor 0%, var(--muted) 50%, currentColor 100%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: shimmer 1.6s linear infinite;
+  animation:
+    word-in 260ms ease-out,
+    shimmer 1.6s linear infinite;
+}
+.log-btn .status-word {
+  color: var(--on-solid);
+  background-image: linear-gradient(90deg, currentColor 0%, rgb(128 128 128 / 0.9) 50%, currentColor 100%);
+}
+@keyframes word-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
 }
 @keyframes shimmer {
   from {
@@ -1100,12 +1149,20 @@ input {
   opacity: 0.25;
   transform: scale(0.92);
 }
+.photo-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 14px 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
 .photo-chip {
   align-self: flex-start;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 4px 14px 0;
+  gap: 6px;
   padding: 5px 6px 5px 5px;
   border-radius: 16px;
   background: var(--glass);
@@ -1738,4 +1795,183 @@ input {
   color: var(--ink-2);
   display: grid;
   place-items: center;
+}
+
+/* ---- Meal details: tap a meal on the canvas ----------------------------------- */
+.meal-hit {
+  fill: transparent;
+  cursor: pointer;
+  transition: fill 140ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.meal-hit:active {
+  fill: rgb(var(--shadow) / 0.07);
+}
+.meal-sheet .settings-head h2 {
+  font-size: 30px;
+}
+.meal-sheet .settings-head small {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.meal-doodle {
+  display: block;
+  width: min(240px, 70%);
+  margin: 0 auto;
+}
+.meal-kcal {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 4px 12px;
+}
+.meal-kcal b {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+}
+.meal-kcal span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.macros {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.macro {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  min-width: 0;
+}
+.macro b {
+  font-size: 17px;
+  font-weight: 700;
+}
+.macro > span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.macro-bar {
+  display: block;
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--fill);
+  overflow: hidden;
+}
+.macro-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--orb-a), var(--orb-b));
+}
+.macro small {
+  font-size: 10.5px;
+  color: var(--ink-2);
+}
+.meal-note {
+  margin: 12px 4px 0;
+  font-size: 14px;
+  font-style: italic;
+  color: var(--ink-2);
+}
+.foods {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.food {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+}
+.food-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.food-top strong {
+  font-size: 15px;
+}
+.food-top strong::first-letter {
+  text-transform: uppercase;
+}
+.food-kcal {
+  flex: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.food-macros {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.ingredients {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+}
+.ingredients li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ingredients em {
+  font-style: normal;
+  color: var(--muted);
+}
+.food-src {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  min-width: 0;
+}
+.src-chip {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background: var(--fill);
+  color: var(--ink-2);
+}
+.src-chip.estimate {
+  border: 1px dashed var(--edge);
+  background: none;
+}
+.src-detail {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+a.src-detail {
+  color: var(--ink-2);
+}
+.ask-coach {
+  width: 100%;
+  margin-top: 16px;
+}
+.goals-note.center {
+  text-align: center;
 }

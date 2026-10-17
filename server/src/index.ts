@@ -9,14 +9,14 @@ import {
   countUserMessages,
   deleteUser,
   findDay,
-  getOrCreateDay,
+  forgetMemory,
   getTips,
   getUser,
   latestCanvas,
   listMeals,
+  listMemories,
   listMessages,
   migrate,
-  saveCanvas,
   saveTips,
   sumMacros,
   updateProfile,
@@ -27,6 +27,7 @@ import {
 } from './db.ts';
 import { requireUser } from './auth.ts';
 import { describePhoto, runAgent, writeTips } from './agent.ts';
+import { jobFor, startJob } from './jobs.ts';
 import { buildCanvas } from './layout.ts';
 import { profileComplete, scoreDay, targetsFor } from './scores.ts';
 import { THEMES, type CalendarDay, type ChatResponse, type DayView, type Me, type Profile, type Theme } from '../../shared/types.ts';
@@ -53,6 +54,7 @@ function me(user: UserRow): Me {
     profileComplete: profileComplete(user.profile),
     targets: targetsFor(user.profile),
     guideSeen: user.guideSeen,
+    memories: listMemories(user.id),
   };
 }
 
@@ -66,13 +68,14 @@ function dayView(user: UserRow, date: string): DayView {
   const tips = dayId ? getTips(dayId) : null;
   return {
     date,
+    pending: jobFor(user.id)?.stage ?? null,
     version,
     canvas: buildCanvas(meals), // always the current layout; versions are saved on each change
     meals: meals.map(({ doodle, ...m }) => m),
     totals,
     scores: targets ? scoreDay(meals, totals, targets) : null,
     tips: tips && tips.version === version ? tips.text : null,
-    messages: dayId ? listMessages(dayId) : [],
+    messages: listMessages(user.id),
   };
 }
 
@@ -102,6 +105,11 @@ api.post('/me/guide-seen', (c) => {
   return c.json({ ok: true });
 });
 
+api.delete('/me/memories/:id', (c) => {
+  forgetMemory(c.get('user').id, Number(c.req.param('id')));
+  return c.json(me(getUser(c.get('user').id)));
+});
+
 api.delete('/me', (c) => {
   for (const photo of deleteUser(c.get('user').id)) rmSync(resolve(DATA, photo), { force: true });
   return c.json({ ok: true });
@@ -126,6 +134,7 @@ api.post('/day/:date/tips', async (c) => {
     totals: Object.fromEntries(Object.entries(view.totals).map(([k, v]) => [k, Math.round(v)])),
     targets: targetsFor(user.profile),
     scores: view.scores,
+    memories: listMemories(user.id).map((m) => m.text),
   });
   saveTips(dayId, tips, view.version);
   return c.json({ tips });
@@ -142,69 +151,85 @@ api.get('/calendar', (c) => {
   return c.json({ registeredOn: me(user).registeredOn, days });
 });
 
+// The phone's own date, so "today" and "yesterday" are the user's, not the server's. Trusted within a day of ours.
+function clientToday(v: unknown): string {
+  const s = String(v ?? '');
+  const ours = new Date();
+  const near = [-1, 0, 1].map((d) => new Date(ours.getTime() + d * 86_400_000).toLocaleDateString('en-CA'));
+  return isDate(s) && near.includes(s) ? s : near[1];
+}
+const nowOr = (v: unknown) => (isTime(String(v)) ? String(v) : new Date().toTimeString().slice(0, 5));
+
+const MAX_PHOTOS = 4;
+
 api.post('/chat', async (c) => {
   const user = c.get('user');
   if (countUserMessages(user.id, 3600) >= PER_HOUR || countUserMessages(user.id, 86400) >= PER_DAY) {
     return c.json({ error: 'You’ve hit today’s message limit. Please try again later.' }, 429);
   }
   const form = await c.req.formData();
-  const date = String(form.get('date') ?? '');
+  const date = String(form.get('date') ?? ''); // the page the user is viewing
+  const today = clientToday(form.get('today'));
   const text = String(form.get('text') ?? '')
     .trim()
     .slice(0, 2000);
-  const now = String(form.get('now') ?? '');
-  const photoTime = String(form.get('photoTime') ?? '');
-  const photo = form.get('photo');
-  if (!isDate(date)) return c.json({ error: 'bad date' }, 400);
-  if (!text && !(photo instanceof File)) return c.json({ error: 'empty message' }, 400);
+  const files = form.getAll('photo').filter((p): p is File => p instanceof File);
+  const takenAt = form.getAll('photoTime').map(String);
+  if (!isDate(date) || date > today) return c.json({ error: 'bad date' }, 400);
+  if (!text && !files.length) return c.json({ error: 'empty message' }, 400);
+  if (files.length > MAX_PHOTOS) return c.json({ error: `up to ${MAX_PHOTOS} photos per message` }, 400);
+  if (files.some((f) => f.size > 8_000_000)) return c.json({ error: 'photo too large' }, 413);
+  if (jobFor(user.id)) return c.json({ error: 'Still working on your last message, one moment.' }, 409);
 
-  const dayId = getOrCreateDay(user.id, date);
+  const saved = await Promise.all(
+    files.map(async (photo, i) => {
+      const buf = Buffer.from(await photo.arrayBuffer());
+      const file = resolve(UPLOADS, `${randomUUID()}.jpg`);
+      writeFileSync(file, buf);
+      const when = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(takenAt[i] ?? '') ? takenAt[i] : null;
+      return { path: relative(DATA, file), dataUrl: `data:${photo.type || 'image/jpeg'};base64,${buf.toString('base64')}`, takenAt: when };
+    }),
+  );
 
-  let photoPath: string | null = null;
-  let photoDescription: string | null = null;
-  if (photo instanceof File) {
-    if (photo.size > 8_000_000) return c.json({ error: 'photo too large' }, 413);
-    const buf = Buffer.from(await photo.arrayBuffer());
-    const file = resolve(UPLOADS, `${randomUUID()}.jpg`);
-    writeFileSync(file, buf);
-    photoPath = relative(DATA, file);
-    photoDescription = await describePhoto(`data:${photo.type || 'image/jpeg'};base64,${buf.toString('base64')}`);
-  }
-
-  addMessage(dayId, 'user', text, photoPath);
-  let reply: string;
-  let suggestions: string[] = [];
-  try {
-    ({ reply, suggestions } = await runAgent({
-      user,
-      dayId,
-      text,
-      photoDescription,
-      now: isTime(now) ? now : new Date().toTimeString().slice(0, 5),
-      photoTime: isTime(photoTime) ? photoTime : null,
-    }));
-    saveCanvas(dayId, buildCanvas(listMeals(dayId)));
-  } catch (err) {
-    console.error('agent failed', err);
-    reply = 'Sorry, something went wrong on my side. Please try again.';
-  }
-  addMessage(dayId, 'assistant', reply, null, suggestions);
+  addMessage(
+    user.id,
+    date,
+    'user',
+    text,
+    saved.map((p) => p.path),
+  );
+  const now = nowOr(form.get('now'));
+  // The agent works in the background: closing the app or the chat doesn't stop it.
+  startJob(user.id, async (setStage) => {
+    let reply: string;
+    let suggestions: string[] = [];
+    try {
+      const photos = await Promise.all(saved.map(async (p) => ({ description: await describePhoto(p.dataUrl, text), takenAt: p.takenAt })));
+      ({ reply, suggestions } = await runAgent({ user, viewedDate: date, today, now, text, photos, onStage: setStage }));
+    } catch (err) {
+      console.error('agent failed', err);
+      reply = 'Sorry, something went wrong on my side. Please try again.';
+    }
+    addMessage(user.id, date, 'assistant', reply, [], suggestions);
+  });
   const fresh = getUser(user.id);
-  return c.json({ reply, day: dayView(fresh, date), me: me(fresh) } satisfies ChatResponse);
+  return c.json({ reply: '', day: dayView(fresh, date), me: me(fresh) } satisfies ChatResponse);
 });
+
+// What the agent is doing with the last message; null once the reply is saved.
+api.get('/chat/status', (c) => c.json({ pending: jobFor(c.get('user').id)?.stage ?? null }));
 
 // First open for someone new: the chat greets them and asks the first setup question.
 api.post('/chat/hello', async (c) => {
   const user = c.get('user');
-  const body = (await c.req.json().catch(() => ({}))) as { date?: string; now?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { date?: string; now?: string; today?: string };
   const date = String(body.date ?? '');
   if (!isDate(date)) return c.json({ error: 'bad date' }, 400);
-  const dayId = getOrCreateDay(user.id, date);
-  if (!profileComplete(user.profile) && !listMessages(dayId).length) {
+  if (!profileComplete(user.profile) && !listMessages(user.id, 1).length) {
     try {
-      const now = isTime(String(body.now)) ? String(body.now) : new Date().toTimeString().slice(0, 5);
-      const out = await runAgent({ user, dayId, text: null, photoDescription: null, now, photoTime: null });
-      addMessage(dayId, 'assistant', out.reply, null, out.suggestions);
+      const today = clientToday(body.today);
+      const out = await runAgent({ user, viewedDate: date, today, now: nowOr(body.now), text: null, photos: [] });
+      addMessage(user.id, date, 'assistant', out.reply, [], out.suggestions);
     } catch (err) {
       console.error('hello failed', err);
     }

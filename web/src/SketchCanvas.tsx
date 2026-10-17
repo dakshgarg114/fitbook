@@ -19,7 +19,8 @@ function strokePath(points: Point[], size: number): string {
   return outlineToPath(getStroke(points, { size: size * 1.4, thinning: 0.55, smoothing: 0.6, streamline: 0.4, simulatePressure: true }));
 }
 
-export function SketchCanvas({ canvas }: { canvas: Canvas }) {
+// onPick: tapping a meal's row opens its details.
+export function SketchCanvas({ canvas, onPick }: { canvas: Canvas; onPick?: (mealId: number) => void }) {
   // Items already shown appear instantly; new ones "draw in" one after another.
   const seen = useRef<Set<string> | null>(null);
   const firstRender = seen.current === null;
@@ -67,6 +68,21 @@ export function SketchCanvas({ canvas }: { canvas: Canvas }) {
         </filter>
       </defs>
       {nodes}
+      {onPick &&
+        canvas.rows?.map((r) => (
+          <rect
+            key={`hit-${r.mealId}`}
+            class="meal-hit"
+            x={4}
+            y={r.y}
+            width={canvas.width - 8}
+            height={r.height}
+            rx={16}
+            role="button"
+            aria-label="Show meal details"
+            onClick={() => onPick(r.mealId)}
+          />
+        ))}
     </svg>
   );
 }

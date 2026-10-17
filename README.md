@@ -16,7 +16,9 @@ server/   Node + Hono API, SQLite storage (node:sqlite), Firebase ID-token auth
 shared/   Types shared by both
 ```
 
-When you send a message, the server asks a DeepSeek model for a plan: meals to add or change, profile updates and a short reply. Nutrition comes from [USDA FoodData Central](https://fdc.nal.usda.gov/), with the model's estimate as a fallback. Doodles are composed from a small library of hand-drawn SVG parts (`server/src/doodle`); the model only picks the parts. Every change to a day's canvas is saved as a new version.
+When you send a message, the server runs a DeepSeek model in a tool loop (`server/src/agent.ts`, `server/src/tools.ts`) in the background, so closing the app doesn't stop it. The agent can read any day, look up nutrition, add, change or remove meals on the page you're viewing or another day, update your profile and goals, and remember lasting facts like "vegetarian". Changes are staged and saved together at the end.
+
+Nutrition comes from tables, not from the model: [USDA FoodData Central](https://fdc.nal.usda.gov/) for cooked dishes, and the Indian Food Composition Tables 2017 (National Institute of Nutrition, ICMR; via the MIT-licensed [`@ifct2017/compositions`](https://www.npmjs.com/package/@ifct2017/compositions) package, pinned because later releases moved to AGPL) for raw ingredients and home recipes. The model's estimate is the fallback, and optional web search covers branded foods. Doodles are composed from a small library of hand-drawn SVG parts (`server/src/doodle`); the model only picks the parts. Every change to a day's canvas is saved as a new version.
 
 ## Setup
 
@@ -60,12 +62,13 @@ Fitbook uses Firebase Authentication only to sign people in with Google. The ser
 
 ### 4. Everything else
 
-| Variable                                    | Purpose                                                                                                 |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `DEV_USER_EMAIL`                            | Local development only: skip sign-in and treat every request as this email. Never set it in production. |
-| `CHAT_LIMIT_PER_HOUR`, `CHAT_LIMIT_PER_DAY` | Per-user message limits (defaults 60 and 100).                                                          |
-| `PORT`                                      | Server port (default `4310`).                                                                           |
-| `FITBOOK_DB`                                | SQLite file (default `data/fitbook.db`).                                                                |
+| Variable                                    | Purpose                                                                                                  |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `DEV_USER_EMAIL`                            | Local development only: skip sign-in and treat every request as this email. Never set it in production.  |
+| `CHAT_LIMIT_PER_HOUR`, `CHAT_LIMIT_PER_DAY` | Per-user message limits (defaults 60 and 100).                                                           |
+| `PORT`                                      | Server port (default `4310`).                                                                            |
+| `FITBOOK_DB`                                | SQLite file (default `data/fitbook.db`).                                                                 |
+| `TAVILY_API_KEY`                            | Optional: lets the agent search the web for branded foods ([tavily.com](https://tavily.com), free tier). |
 
 ## Local development
 

@@ -1,15 +1,17 @@
+import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { User } from 'firebase/auth';
-import type { ChatResponse, DayView, Me } from '../../shared/types.ts';
+import type { AgentStage, ChatResponse, DayView, Me } from '../../shared/types.ts';
 import { SketchCanvas } from './SketchCanvas.tsx';
 import { Summary } from './Summary.tsx';
 import { Calendar, type CalendarData } from './Calendar.tsx';
-import { AgentSteps } from './Orb.tsx';
+import { AgentStatus } from './Orb.tsx';
 import { Settings } from './Settings.tsx';
 import { CoachOrb } from './CoachOrb.tsx';
 import { Guide } from './Guide.tsx';
 import { InstallHint } from './InstallHint.tsx';
 import { Receipt, splitReply } from './Receipts.tsx';
+import { MealSheet } from './MealSheet.tsx';
 import { useDictation, useVisualViewport } from './hooks.ts';
 import { applyTheme } from './theme.ts';
 import { api } from './api.ts';
@@ -104,7 +106,12 @@ function Main() {
   const [day, setDay] = useState<DayView | null>(null);
   const [error, setError] = useState('');
   const [chatOpen, setChatOpen] = useState(false);
-  const [agentBusy, setAgentBusy] = useState(false);
+  // Text to put in the chat box when it opens ("Change this in chat"); n makes each request new.
+  const [draft, setDraft] = useState({ text: '', n: 0 });
+  const [openMeal, setOpenMeal] = useState<number | null>(null);
+  // Sending: the message is uploading. After that the server works in the background and day.pending
+  // carries its stage, so closing the chat or the app doesn't stop it.
+  const [sending, setSending] = useState(false);
   const [guide, setGuide] = useState(false);
   const [brandMenu, setBrandMenu] = useState(false);
   // Any tap outside the Fitbook name closes its popup.
@@ -149,6 +156,32 @@ function Main() {
         scroller.current?.scrollTo({ top: 0 });
       })
       .catch((e) => setError(`Couldn't load the day: ${e.message}`));
+  }, [date]);
+
+  // Reloads the page, profile and calendar from the server: after the agent finishes, and on return to the app.
+  const sync = () => {
+    api<DayView>(`/day/${date}`)
+      .then(setDay)
+      .catch(() => {});
+    api<Me>('/me')
+      .then(setMe)
+      .catch(() => {});
+    loadCalendar();
+  };
+  const stage = day?.pending ?? null;
+  useEffect(() => {
+    if (!stage) return;
+    const t = setInterval(() => {
+      api<{ pending: AgentStage | null }>('/chat/status')
+        .then(({ pending }) => (pending ? setDay((d) => (d ? { ...d, pending } : d)) : sync()))
+        .catch(() => {});
+    }, 1500);
+    return () => clearInterval(t);
+  }, [stage, date]);
+  useEffect(() => {
+    const onShow = () => document.visibilityState === 'visible' && sync();
+    document.addEventListener('visibilitychange', onShow);
+    return () => document.removeEventListener('visibilitychange', onShow);
   }, [date]);
 
   const canNext = date < t;
@@ -223,7 +256,7 @@ function Main() {
         : '';
 
   return (
-    <div class={`app ${agentBusy ? 'agent-busy' : ''}`}>
+    <div class={`app ${sending || stage ? 'agent-busy' : ''}`}>
       <div class="agent-glow" aria-hidden="true" />
       <header class="bar">
         <div class="brand-wrap">
@@ -263,7 +296,9 @@ function Main() {
           </div>
         )}
         <div style={{ transform: pull ? `translateY(${pull > 0 ? 0 : pull}px)` : undefined }}>
-          <section class="paper">{day ? <SketchCanvas key={date} canvas={day.canvas} /> : <p class="loading">Loading…</p>}</section>
+          <section class="paper">
+            {day ? <SketchCanvas key={date} canvas={day.canvas} onPick={setOpenMeal} /> : <p class="loading">Loading…</p>}
+          </section>
           {error && <p class="err">{error}</p>}
           <div class="edge-note">{canNext ? 'Pull up for the next day' : ''}</div>
         </div>
@@ -274,7 +309,9 @@ function Main() {
         )}
       </div>
 
-      {day && me && <Summary day={day} me={me} onLog={chatOpen ? undefined : () => setChatOpen(true)} />}
+      {day && me && (
+        <Summary day={day} me={me} stage={stage ?? (sending ? 'analysing' : null)} onLog={chatOpen ? undefined : () => setChatOpen(true)} />
+      )}
       {day && me && (
         <Chat
           open={chatOpen}
@@ -288,7 +325,22 @@ function Main() {
             loadCalendar();
           }}
           onOptimistic={setDay}
-          onBusy={setAgentBusy}
+          draft={draft}
+          sending={sending}
+          onSending={setSending}
+        />
+      )}
+
+      {openMeal !== null && day && me && day.meals.some((m) => m.id === openMeal) && (
+        <MealSheet
+          meal={day.meals.find((m) => m.id === openMeal)!}
+          day={day}
+          targets={me.targets}
+          onClose={() => setOpenMeal(null)}
+          onAsk={(m) => {
+            setDraft({ text: `${m.heading} (${m.time}): `, n: draft.n + 1 });
+            setChatOpen(true);
+          }}
         />
       )}
 
@@ -329,7 +381,9 @@ function Main() {
   );
 }
 
-// Thumbnail of the photo about to be sent, with a remove button.
+const MAX_PHOTOS = 4;
+
+// Thumbnail of a photo about to be sent, with a remove button.
 function PhotoChip({ file, onRemove }: { file: File; onRemove: () => void }) {
   const [url, setUrl] = useState('');
   useEffect(() => {
@@ -340,7 +394,6 @@ function PhotoChip({ file, onRemove }: { file: File; onRemove: () => void }) {
   return (
     <div class="photo-chip">
       {url && <img src={url} alt="Selected meal photo" />}
-      <span>Photo ready</span>
       <button type="button" aria-label="Remove photo" onClick={onRemove}>
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
           <path d="M6 6l12 12M18 6L6 18" />
@@ -358,22 +411,26 @@ function Chat(props: {
   onClose: () => void;
   onResult: (r: ChatResponse) => void;
   onOptimistic: (d: DayView) => void;
-  onBusy: (b: boolean) => void;
+  draft: { text: string; n: number };
+  sending: boolean;
+  onSending: (b: boolean) => void;
 }) {
-  const { date, day, me } = props;
+  const { date, day, me, sending } = props;
   const [text, setText] = useState('');
-  const [photo, setPhoto] = useState<File | null>(null);
-  const [busy, setBusy] = useState<false | 'text' | 'photo'>(false);
+  const [photos, setPhotos] = useState<File[]>([]);
+  const photo = photos.length > 0;
+  const setBusy = props.onSending;
+  const stage = day.pending ?? (sending ? 'analysing' : null);
+  const busy = !!stage;
   const [error, setError] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const vv = useVisualViewport();
-  useEffect(() => props.onBusy(!!busy), [busy]);
   // Someone new opening the chat: it greets them and asks the first setup question.
   useEffect(() => {
     if (!props.open || me.profileComplete || busy || day.messages.length) return;
-    setBusy('text');
-    api<ChatResponse>('/chat/hello', { method: 'POST', body: JSON.stringify({ date, now: nowHHMM() }) })
+    setBusy(true);
+    api<ChatResponse>('/chat/hello', { method: 'POST', body: JSON.stringify({ date, now: nowHHMM(), today: today() }) })
       .then(props.onResult)
       .catch((e) => setError(e.message))
       .finally(() => setBusy(false));
@@ -382,6 +439,12 @@ function Chat(props: {
   const fromChat = lastMsg?.role === 'assistant' && !!lastMsg.suggestions?.length;
   const quick = fromChat ? lastMsg.suggestions! : me.profileComplete ? suggestionsFor(day) : [];
   const dictation = useDictation((t) => setText(t));
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!props.draft.n) return;
+    setText(props.draft.text);
+    setTimeout(() => input.current?.focus(), 350);
+  }, [props.draft.n]);
 
   // Scroll only the message list (scrollIntoView would also scroll the page on iOS).
   useEffect(() => {
@@ -393,20 +456,23 @@ function Chat(props: {
     e?.preventDefault();
     const text = typed;
     if (busy || (!text.trim() && !photo)) return;
-    setBusy(photo ? 'photo' : 'text');
+    setBusy(true);
     setError('');
     const form = new FormData();
     form.set('date', date);
+    form.set('today', today());
     form.set('text', text.trim());
     form.set('now', nowHHMM());
-    if (photo) {
-      const when = await photoTime(photo, date).catch(() => null);
-      if (when) form.set('photoTime', when);
-      form.set('photo', await shrinkPhoto(photo), 'photo.jpg');
+    for (const p of photos) {
+      form.append('photoTime', (await photoTime(p).catch(() => null)) ?? '');
+      form.append('photo', await shrinkPhoto(p), 'photo.jpg');
     }
-    props.onOptimistic({ ...day, messages: [...day.messages, { role: 'user', text: text.trim(), hasPhoto: !!photo, createdAt: '' }] });
+    props.onOptimistic({
+      ...day,
+      messages: [...day.messages, { role: 'user', text: text.trim(), photos: photos.length, date, createdAt: '' }],
+    });
     setText('');
-    setPhoto(null);
+    setPhotos([]);
     try {
       props.onResult(await api<ChatResponse>('/chat', { method: 'POST', body: form }));
     } catch (err) {
@@ -440,29 +506,39 @@ function Chat(props: {
       </div>
       <div class="chat-log" ref={log}>
         {day.messages.map((m, i) => {
+          // One thread across all days: a chip marks where the open page changed.
+          const chip = m.date && m.date !== day.messages[i - 1]?.date && (
+            <div class="day-chip">{m.date === today() ? 'Today' : prettyDate(m.date)}</div>
+          );
           if (m.role !== 'assistant') {
             return (
-              <div key={i} class={`msg ${m.role}`}>
-                {m.hasPhoto && <span class="photo-tag">Photo</span>}
-                {m.text}
-              </div>
+              <Fragment key={i}>
+                {chip}
+                <div class={`msg ${m.role}`}>
+                  {m.photos > 0 && <span class="photo-tag">{m.photos > 1 ? `${m.photos} photos` : 'Photo'}</span>}
+                  {m.text}
+                </div>
+              </Fragment>
             );
           }
           const { reply, actions } = splitReply(m.text);
           return (
-            <div key={i} class="turn">
-              {reply && <div class="msg assistant">{reply}</div>}
-              {actions.length > 0 && (
-                <div class="receipts">
-                  {actions.map((a) => (
-                    <Receipt key={a} text={a} />
-                  ))}
-                </div>
-              )}
-            </div>
+            <Fragment key={i}>
+              {chip}
+              <div class="turn">
+                {reply && <div class="msg assistant">{reply}</div>}
+                {actions.length > 0 && (
+                  <div class="receipts">
+                    {actions.map((a) => (
+                      <Receipt key={a} text={a} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Fragment>
           );
         })}
-        {busy && <AgentSteps photo={busy === 'photo'} />}
+        {stage && <AgentStatus stage={stage} />}
         {error && <div class="msg error">{error}</div>}
       </div>
       {!busy && !text && !photo && quick.length > 0 && (
@@ -475,11 +551,35 @@ function Chat(props: {
           ))}
         </div>
       )}
-      {photo && <PhotoChip file={photo} onRemove={() => setPhoto(null)} />}
+      {photo && (
+        <div class="photo-chips">
+          {photos.map((f, i) => (
+            <PhotoChip key={`${f.name}-${f.lastModified}-${i}`} file={f} onRemove={() => setPhotos(photos.filter((_, j) => j !== i))} />
+          ))}
+          <span>{photos.length > 1 ? `${photos.length} photos` : 'Photo ready'}</span>
+        </div>
+      )}
       <form class="composer" onSubmit={send}>
-        <input ref={fileInput} type="file" accept="image/*" hidden onChange={(e) => setPhoto(e.currentTarget.files?.[0] ?? null)} />
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            const picked = [...(e.currentTarget.files ?? [])];
+            setPhotos([...photos, ...picked].slice(0, MAX_PHOTOS));
+            e.currentTarget.value = '';
+          }}
+        />
         <div class="pill">
-          <button type="button" class="cam" aria-label="Add a photo of your meal" onClick={() => fileInput.current?.click()}>
+          <button
+            type="button"
+            class="cam"
+            aria-label="Add photos of your meal"
+            disabled={photos.length >= MAX_PHOTOS}
+            onClick={() => fileInput.current?.click()}
+          >
             <svg
               viewBox="0 0 24 24"
               width="22"
@@ -497,6 +597,7 @@ function Chat(props: {
             </svg>
           </button>
           <input
+            ref={input}
             class="text"
             value={text}
             placeholder={dictation.listening ? 'Listening…' : photo ? 'Add a note (optional)' : 'Tell me what you ate…'}

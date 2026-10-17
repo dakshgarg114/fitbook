@@ -9,25 +9,27 @@ export interface UsdaMatch {
 
 const NUTRIENT = { calories: [1008, 2047, 2048], protein: [1003], fat: [1004], carbs: [1005], fiber: [1079], sugar: [2000, 1063] };
 
-export async function searchFood(query: string): Promise<UsdaMatch | null> {
+// Up to `limit` matches that have an energy value, best first.
+export async function searchFoods(query: string, limit = 5): Promise<UsdaMatch[]> {
   const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${process.env.USDA_API_KEY}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, pageSize: 8, dataType: ['Survey (FNDDS)', 'Foundation', 'SR Legacy'] }),
+    body: JSON.stringify({ query, pageSize: 12, dataType: ['Survey (FNDDS)', 'Foundation', 'SR Legacy'] }),
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     console.warn(`USDA search failed ${res.status} for "${query}"`);
-    return null;
+    return [];
   }
   const data = (await res.json()) as {
     foods?: { fdcId: number; description: string; foodNutrients: { nutrientId: number; value: number }[] }[];
   };
+  const out: UsdaMatch[] = [];
   for (const food of data.foods ?? []) {
     const get = (ids: number[]) => food.foodNutrients.find((n) => ids.includes(n.nutrientId))?.value;
     const calories = get(NUTRIENT.calories);
     if (calories == null) continue;
-    return {
+    out.push({
       fdcId: food.fdcId,
       description: food.description,
       per100g: {
@@ -38,7 +40,8 @@ export async function searchFood(query: string): Promise<UsdaMatch | null> {
         fiber: get(NUTRIENT.fiber) ?? 0,
         sugar: get(NUTRIENT.sugar) ?? 0,
       },
-    };
+    });
+    if (out.length >= limit) break;
   }
-  return null;
+  return out;
 }

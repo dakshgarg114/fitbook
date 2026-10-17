@@ -113,6 +113,28 @@ const MIGRATIONS = [
   `ALTER TABLE messages ADD COLUMN suggestions_json TEXT NOT NULL DEFAULT '[]';`,
   // v7: the user's usual daily routine, optional.
   `ALTER TABLE users ADD COLUMN routine TEXT;`,
+  // v8: one chat thread per user (day_id is now the day that was open); several photos per message;
+  // coach memory; where each food's numbers came from.
+  `
+  ALTER TABLE messages ADD COLUMN user_id INTEGER REFERENCES users(id);
+  ALTER TABLE messages ADD COLUMN viewed_date TEXT;
+  ALTER TABLE messages ADD COLUMN photos_json TEXT NOT NULL DEFAULT '[]';
+  UPDATE messages SET
+    user_id = (SELECT user_id FROM days WHERE days.id = messages.day_id),
+    viewed_date = (SELECT date FROM days WHERE days.id = messages.day_id);
+  UPDATE messages SET photos_json = json_array(photo_path) WHERE photo_path IS NOT NULL;
+  CREATE INDEX messages_user ON messages(user_id, id);
+  CREATE TABLE memories (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    deleted_at TEXT
+  );
+  ALTER TABLE log_entries ADD COLUMN ref TEXT;
+  ALTER TABLE log_entries ADD COLUMN ingredients_json TEXT;
+  ALTER TABLE log_entries ADD COLUMN source_url TEXT;
+  `,
 ];
 
 export function migrate() {
@@ -222,30 +244,53 @@ export function markGuideSeen(userId: number) {
 
 // Deletes everything we hold for a user; returns the photo paths to remove from disk.
 export function deleteUser(userId: number): string[] {
-  const photos = (
-    db
-      .prepare('SELECT photo_path FROM messages WHERE photo_path IS NOT NULL AND day_id IN (SELECT id FROM days WHERE user_id = ?)')
-      .all(userId) as { photo_path: string }[]
-  ).map((r) => r.photo_path);
+  const rows = db.prepare('SELECT photos_json FROM messages WHERE day_id IN (SELECT id FROM days WHERE user_id = ?)').all(userId) as {
+    photos_json: string;
+  }[];
+  const photos = rows.flatMap((r) => JSON.parse(r.photos_json) as string[]);
   db.exec('BEGIN');
   for (const t of ['messages', 'canvas_versions', 'log_entries', 'meals']) {
     db.prepare(`DELETE FROM ${t} WHERE day_id IN (SELECT id FROM days WHERE user_id = ?)`).run(userId);
   }
+  db.prepare('DELETE FROM memories WHERE user_id = ?').run(userId);
   db.prepare('DELETE FROM days WHERE user_id = ?').run(userId);
   db.prepare('DELETE FROM users WHERE id = ?').run(userId);
   db.exec('COMMIT');
   return photos;
 }
 
-// Messages the user sent in the last `seconds`, across all days (for rate limits).
+// Messages the user sent in the last `seconds` (for rate limits).
 export function countUserMessages(userId: number, seconds: number): number {
   const r = db
-    .prepare(
-      `SELECT count(*) AS n FROM messages WHERE role = 'user' AND created_at >= datetime('now', ?)
-       AND day_id IN (SELECT id FROM days WHERE user_id = ?)`,
-    )
+    .prepare(`SELECT count(*) AS n FROM messages WHERE role = 'user' AND created_at >= datetime('now', ?) AND user_id = ?`)
     .get(`-${seconds} seconds`, userId) as { n: number };
   return r.n;
+}
+
+// --- coach memory ------------------------------------------------------------------
+
+export interface Memory {
+  id: number;
+  text: string;
+}
+
+export function listMemories(userId: number): Memory[] {
+  return db
+    .prepare('SELECT id, text FROM memories WHERE user_id = ? AND deleted_at IS NULL ORDER BY id')
+    .all(userId) as unknown as Memory[];
+}
+
+export function addMemory(userId: number, text: string) {
+  db.prepare('INSERT INTO memories (user_id, text) VALUES (?, ?)').run(userId, text);
+}
+
+// Returns the forgotten text, or null if it wasn't this user's.
+export function forgetMemory(userId: number, id: number): string | null {
+  const r = db.prepare('SELECT text FROM memories WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(id, userId) as
+    { text: string } | undefined;
+  if (!r) return null;
+  db.prepare("UPDATE memories SET deleted_at = datetime('now') WHERE id = ?").run(id);
+  return r.text;
 }
 
 // --- days, meals, entries --------------------------------------------------------
@@ -287,6 +332,10 @@ function toEntry(r: Row): LogEntry {
     foodGroup: r.food_group as FoodGroup,
     source: r.source,
     usdaDescription: r.usda_description,
+    ingredients: r.ingredients_json
+      ? (JSON.parse(r.ingredients_json) as { name: string; grams: number }[]).map(({ name, grams }) => ({ name, grams }))
+      : null,
+    sourceUrl: r.source_url ?? null,
   };
 }
 
@@ -337,31 +386,34 @@ export function saveCanvas(dayId: number, canvas: Canvas): number {
   return prev + 1;
 }
 
-export function listMessages(dayId: number): ChatMessage[] {
+// The user's one chat thread, oldest first: the last `limit` messages.
+export function listMessages(userId: number, limit = 80): ChatMessage[] {
   const rows = db
-    .prepare('SELECT role, text, photo_path, suggestions_json, created_at FROM messages WHERE day_id = ? ORDER BY id')
-    .all(dayId) as Row[];
+    .prepare(
+      `SELECT * FROM (SELECT role, text, photos_json, suggestions_json, created_at, viewed_date, id FROM messages
+       WHERE user_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id`,
+    )
+    .all(userId, limit) as Row[];
   return rows.map((r) => ({
     role: r.role,
     text: r.text,
-    hasPhoto: !!r.photo_path,
+    photos: (JSON.parse(r.photos_json) as string[]).length,
+    date: r.viewed_date,
     createdAt: r.created_at,
     suggestions: JSON.parse(r.suggestions_json ?? '[]'),
   }));
 }
 
 export function addMessage(
-  dayId: number,
+  userId: number,
+  viewedDate: string,
   role: 'user' | 'assistant',
   text: string,
-  photoPath: string | null = null,
+  photos: string[] = [],
   suggestions: string[] = [],
 ) {
-  db.prepare('INSERT INTO messages (day_id, role, text, photo_path, suggestions_json) VALUES (?, ?, ?, ?, ?)').run(
-    dayId,
-    role,
-    text,
-    photoPath,
-    JSON.stringify(suggestions),
-  );
+  const dayId = getOrCreateDay(userId, viewedDate);
+  db.prepare(
+    'INSERT INTO messages (user_id, day_id, viewed_date, role, text, photos_json, suggestions_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run(userId, dayId, viewedDate, role, text, JSON.stringify(photos), JSON.stringify(suggestions));
 }
